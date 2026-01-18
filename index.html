@@ -55,7 +55,6 @@
         const MISSION_REWARDS = { daily: 10, weekly: 60, monthly: 250, campaign: 1000 };
         const XP_REWARDS = { daily: 20, weekly: 120, monthly: 500, campaign: 2000 };
 
-        // RPG Leveling Math: Level = floor(sqrt(xp/50)) + 1
         const getLevel = (xp) => Math.floor(Math.sqrt((xp || 0) / 50)) + 1;
         const getXPForLevel = (lvl) => Math.pow(lvl - 1, 2) * 50;
 
@@ -116,6 +115,7 @@
             const [activeFilter, setActiveFilter] = useState('All');
             const [archiveStatus, setArchiveStatus] = useState("");
             const [importText, setImportText] = useState("");
+            const [showHardResetConfirm, setShowHardResetConfirm] = useState(false);
 
             const [guildData, setGuildData] = useState({
                 familyXP: 0, familyGold: 0,
@@ -167,16 +167,54 @@
                 catch (e) { await window.FB.setDoc(guildDoc, update, { merge: true }); }
             };
 
+            const adjustManual = (id, field, amount) => {
+                if (id === 'Family') {
+                    const currentVal = Number(field === 'gp' ? guildData.familyGold : guildData.familyXP) || 0;
+                    const update = {};
+                    if (field === 'gp') update.familyGold = Math.max(0, currentVal + amount);
+                    else update.familyXP = Math.max(0, currentVal + amount);
+                    sync(update);
+                } else {
+                    const newMembers = guildData.members.map(m => {
+                        if (m.id === id) {
+                            const currentVal = Number(m[field] || 0);
+                            return { ...m, [field]: Math.max(0, currentVal + amount) };
+                        }
+                        return m;
+                    });
+                    sync({ members: newMembers });
+                }
+            };
+
+            const performHardReset = async () => {
+                const initialState = {
+                    familyXP: 0, familyGold: 0,
+                    members: [
+                        { id: 'Eric', name: 'Eric', class: 'Architect', gp: 0, xp: 0 },
+                        { id: 'Catie', name: 'Catie', class: 'Alchemist', gp: 0, xp: 0 },
+                        { id: 'Rory', name: 'Rory', class: 'Squire', gp: 0, xp: 0 },
+                        { id: 'Olive', name: 'Olive', class: 'Scout', gp: 0, xp: 0 }
+                    ],
+                    quests: [], 
+                    reminders: [], 
+                    claimedBonuses: { rooms: [], sanctuary: false },
+                    rewards: { Family: [], Eric: [], Catie: [], Rory: [], Olive: [] },
+                    menu: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => ({ day: d, meal: 'TBD' }))
+                };
+                const appId = 'brown-family-guild';
+                await window.FB.setDoc(window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'guildState', 'master'), initialState);
+                setArchiveStatus("Hall Purged!");
+                setShowHardResetConfirm(false);
+                setTimeout(() => setArchiveStatus(""), 3000);
+            };
+
             const completeQuest = (id) => {
                 const q = guildData.quests.find(x => x.id === id);
                 if (!q || q.status === 'completed') return;
                 const newQuests = guildData.quests.map(x => x.id === id ? { ...x, status: 'completed' } : x);
-                
                 const xpAward = Number(q.xp || 0);
                 const gpAward = Number(q.reward || 0);
-
                 const update = { quests: newQuests };
-
                 if (q.assignedTo === 'Family') {
                     update.familyGold = Number(guildData.familyGold || 0) + gpAward;
                     update.familyXP = Number(guildData.familyXP || 0) + xpAward;
@@ -234,7 +272,7 @@
                 const el = document.createElement('textarea');
                 el.value = blob; document.body.appendChild(el); el.select();
                 document.execCommand('copy'); document.body.removeChild(el);
-                setArchiveStatus("Ledger Copied!"); setTimeout(() => setArchiveStatus(""), 3000);
+                setArchiveStatus("Scroll Copied!"); setTimeout(() => setArchiveStatus(""), 3000);
             };
 
             const restoreLedger = async () => {
@@ -243,8 +281,8 @@
                     const data = JSON.parse(importText);
                     const appId = 'brown-family-guild';
                     await window.FB.setDoc(window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'guildState', 'master'), data);
-                    setArchiveStatus("Synced!"); setImportText("");
-                } catch(e) { alert("Corruption detected."); }
+                    setArchiveStatus("Restored!"); setImportText("");
+                } catch(e) { setArchiveStatus("Error!"); }
             };
 
             const filteredQuests = (guildData.quests || []).filter(q => q.category !== 'Cleaning' && q.type !== 'campaign' && (activeFilter === 'All' || q.assignedTo === activeFilter));
@@ -321,62 +359,116 @@
                             <div className="lg:col-span-2 space-y-12">
                                 
                                 {isMeetingMode && (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 border border-amber-900/30 p-6 bg-black/40 animate-in fade-in slide-in-from-top-2">
-                                        <div className="space-y-3">
-                                            <h2 className="text-[10px] uppercase font-bold text-blue-400 tracking-widest">Mission Summoner</h2>
-                                            <input className="w-full p-2 text-[10px]" placeholder="Name..." value={newQuest.title} onChange={e => setNewQuest({...newQuest, title: e.target.value})} />
-                                            <select className="w-full p-2 text-[10px]" value={newQuest.assignedTo} onChange={e => setNewQuest({...newQuest, assignedTo: e.target.value})}>
-                                                <option value="Family">Guild Wide</option>{guildData.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                                            </select>
-                                            <select className="w-full p-2 text-[10px]" value={newQuest.type} onChange={e => setNewQuest({...newQuest, type: e.target.value})}>
-                                                <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="campaign">Campaign</option>
-                                            </select>
-                                            <div className="flex gap-1">
-                                                <input className="w-1/2 p-2 text-[10px]" type="number" placeholder="Goal" onChange={e => setNewQuest({...newQuest, targetValue: Number(e.target.value)})} />
-                                                <input className="w-1/2 p-2 text-[10px]" placeholder="Unit" onChange={e => setNewQuest({...newQuest, unit: e.target.value})} />
+                                    <div className="space-y-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 border border-amber-900/30 p-6 bg-black/40 animate-in fade-in slide-in-from-top-2">
+                                            <div className="space-y-3">
+                                                <h2 className="text-[10px] uppercase font-bold text-blue-400 tracking-widest">Mission Summoner</h2>
+                                                <input className="w-full p-2 text-[10px]" placeholder="Name..." value={newQuest.title} onChange={e => setNewQuest({...newQuest, title: e.target.value})} />
+                                                <select className="w-full p-2 text-[10px]" value={newQuest.assignedTo} onChange={e => setNewQuest({...newQuest, assignedTo: e.target.value})}>
+                                                    <option value="Family">Guild Wide</option>{guildData.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                                </select>
+                                                <select className="w-full p-2 text-[10px]" value={newQuest.type} onChange={e => setNewQuest({...newQuest, type: e.target.value})}>
+                                                    <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="campaign">Campaign</option>
+                                                </select>
+                                                <div className="flex gap-1">
+                                                    <input className="w-1/2 p-2 text-[10px]" type="number" placeholder="Goal" onChange={e => setNewQuest({...newQuest, targetValue: Number(e.target.value)})} />
+                                                    <input className="w-1/2 p-2 text-[10px]" placeholder="Unit" onChange={e => setNewQuest({...newQuest, unit: e.target.value})} />
+                                                </div>
+                                                <button onClick={() => {
+                                                    const r = MISSION_REWARDS[newQuest.type];
+                                                    const x = XP_REWARDS[newQuest.type];
+                                                    sync({ quests: [...guildData.quests, {...newQuest, id: Date.now(), status: 'active', currentValue: 0, reward: r, xp: x, category: 'Personal'}]});
+                                                    setNewQuest({ title: '', type: 'daily', assignedTo: 'Family', targetValue: 1, unit: 'task' });
+                                                }} className="w-full py-2 bg-zinc-800 text-[9px] font-bold uppercase hover:bg-zinc-700">Add Mission</button>
                                             </div>
-                                            <button onClick={() => {
-                                                const r = MISSION_REWARDS[newQuest.type];
-                                                const x = XP_REWARDS[newQuest.type];
-                                                sync({ quests: [...guildData.quests, {...newQuest, id: Date.now(), status: 'active', currentValue: 0, reward: r, xp: x, category: 'Personal'}]});
-                                                setNewQuest({ title: '', type: 'daily', assignedTo: 'Family', targetValue: 1, unit: 'task' });
-                                            }} className="w-full py-2 bg-zinc-800 text-[9px] font-bold uppercase hover:bg-zinc-700">Add Mission</button>
+                                            <div className="space-y-3">
+                                                <h2 className="text-[10px] uppercase font-bold text-emerald-400 tracking-widest">Sanctuary</h2>
+                                                <input className="w-full p-2 text-[10px]" placeholder="Clean Task..." value={newCleaning.title} onChange={e => setNewCleaning({...newCleaning, title: e.target.value})} />
+                                                <select className="w-full p-2 text-[10px]" value={newCleaning.room} onChange={e => setNewCleaning({...newCleaning, room: e.target.value})}>
+                                                    {rooms_list.map(r => <option key={r} value={r}>{r}</option>)}
+                                                </select>
+                                                <select className="w-full p-2 text-[10px]" value={newCleaning.type} onChange={e => setNewCleaning({...newCleaning, type: e.target.value})}>
+                                                    <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
+                                                </select>
+                                                <button onClick={() => {
+                                                    const rewardsMap = { daily: { gp: 5, xp: 10 }, weekly: { gp: 30, xp: 60 }, monthly: { gp: 125, xp: 250 } };
+                                                    const tier = rewardsMap[newCleaning.type] || rewardsMap.daily;
+                                                    sync({ quests: [...guildData.quests, {...newCleaning, id: Date.now(), assignedTo: 'Family', category: 'Cleaning', status: 'active', reward: tier.gp, xp: tier.xp, type: newCleaning.type}]});
+                                                }} className="w-full py-2 bg-zinc-800 text-[9px] font-bold uppercase hover:bg-zinc-700">Add Task</button>
+                                                <button onClick={monthlyReset} className="w-full py-1 text-[8px] uppercase border border-red-900 text-red-900">Reset Cleanup</button>
+                                            </div>
+                                            <div className="space-y-3">
+                                                <h2 className="text-[10px] uppercase font-bold text-amber-400 tracking-widest">Treasury</h2>
+                                                <input className="w-full p-2 text-[10px]" placeholder="Reward..." value={newReward.label} onChange={e => setNewReward({...newReward, label: e.target.value})} />
+                                                <select className="w-full p-2 text-[10px]" value={newReward.owner} onChange={e => setNewReward({...newReward, owner: e.target.value})}>
+                                                    <option value="Family">Vault</option>{guildData.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                                </select>
+                                                <select className="w-full p-2 text-[10px]" value={newReward.rarity} onChange={e => setNewReward({...newReward, rarity: e.target.value})}>{Object.keys(TIER_COSTS).map(t => <option key={t}>{t}</option>)}</select>
+                                                <button onClick={async () => {
+                                                    const upd = {...guildData.rewards}; upd[newReward.owner] = [...(upd[newReward.owner] || []), {label: newReward.label, cost: TIER_COSTS[newReward.rarity], rarity: newReward.rarity}];
+                                                    await sync({ rewards: upd });
+                                                }} className="w-full py-2 bg-zinc-800 text-[9px] font-bold uppercase">Add Shop</button>
+                                            </div>
+                                            <div className="space-y-3">
+                                                <h2 className="text-[10px] uppercase font-bold text-purple-400 tracking-widest">Bounties & Data</h2>
+                                                <input className="w-full p-2 text-[10px]" placeholder="Quick Bounty..." value={newBounty} onChange={e => setNewBounty(e.target.value)} />
+                                                <button onClick={() => { if (!newBounty) return; sync({ reminders: [...(guildData.reminders || []), {id: Date.now(), text: newBounty, status: 'active'}] }); setNewBounty(""); }} className="w-full py-2 bg-zinc-800 text-[9px] font-bold uppercase">Post Bounty (+10G)</button>
+                                                <div className="flex gap-1">
+                                                    <button onClick={exportLedger} className="flex-1 py-1 border border-zinc-700 text-[8px] uppercase">{archiveStatus || 'Export'}</button>
+                                                    {showHardResetConfirm ? (
+                                                        <button onClick={performHardReset} className="flex-1 py-1 bg-red-700 text-white text-[8px] uppercase animate-pulse">Confirm Wipe?</button>
+                                                    ) : (
+                                                        <button onClick={() => setShowHardResetConfirm(true)} className="flex-1 py-1 border border-red-900 text-red-900 text-[8px] uppercase">Reset Hall</button>
+                                                    )}
+                                                </div>
+                                                <textarea className="w-full h-8 text-[7px] p-1" placeholder="Paste data..." onChange={e => setImportText(e.target.value)} />
+                                                <button onClick={restoreLedger} className="w-full py-1 text-[8px] bg-zinc-900 border border-zinc-700 uppercase">Restore</button>
+                                            </div>
                                         </div>
-                                        <div className="space-y-3">
-                                            <h2 className="text-[10px] uppercase font-bold text-emerald-400 tracking-widest">Sanctuary</h2>
-                                            <input className="w-full p-2 text-[10px]" placeholder="Clean Task..." value={newCleaning.title} onChange={e => setNewCleaning({...newCleaning, title: e.target.value})} />
-                                            <select className="w-full p-2 text-[10px]" value={newCleaning.room} onChange={e => setNewCleaning({...newCleaning, room: e.target.value})}>
-                                                {rooms_list.map(r => <option key={r} value={r}>{r}</option>)}
-                                            </select>
-                                            <select className="w-full p-2 text-[10px]" value={newCleaning.type} onChange={e => setNewCleaning({...newCleaning, type: e.target.value})}>
-                                                <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
-                                            </select>
-                                            <button onClick={() => {
-                                                const rewardsMap = { daily: { gp: 5, xp: 10 }, weekly: { gp: 30, xp: 60 }, monthly: { gp: 125, xp: 250 } };
-                                                const tier = rewardsMap[newCleaning.type] || rewardsMap.daily;
-                                                sync({ quests: [...guildData.quests, {...newCleaning, id: Date.now(), assignedTo: 'Family', category: 'Cleaning', status: 'active', reward: tier.gp, xp: tier.xp, type: newCleaning.type}]});
-                                            }} className="w-full py-2 bg-zinc-800 text-[9px] font-bold uppercase hover:bg-zinc-700">Add Task</button>
-                                            <button onClick={monthlyReset} className="w-full py-1 text-[8px] uppercase border border-red-900 text-red-900">Reset Cleanup</button>
-                                        </div>
-                                        <div className="space-y-3">
-                                            <h2 className="text-[10px] uppercase font-bold text-amber-400 tracking-widest">Treasury</h2>
-                                            <input className="w-full p-2 text-[10px]" placeholder="Reward..." value={newReward.label} onChange={e => setNewReward({...newReward, label: e.target.value})} />
-                                            <select className="w-full p-2 text-[10px]" value={newReward.owner} onChange={e => setNewReward({...newReward, owner: e.target.value})}>
-                                                <option value="Family">Vault</option>{guildData.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                                            </select>
-                                            <select className="w-full p-2 text-[10px]" value={newReward.rarity} onChange={e => setNewReward({...newReward, rarity: e.target.value})}>{Object.keys(TIER_COSTS).map(t => <option key={t}>{t}</option>)}</select>
-                                            <button onClick={async () => {
-                                                const upd = {...guildData.rewards}; upd[newReward.owner] = [...(upd[newReward.owner] || []), {label: newReward.label, cost: TIER_COSTS[newReward.rarity], rarity: newReward.rarity}];
-                                                await sync({ rewards: upd });
-                                            }} className="w-full py-2 bg-zinc-800 text-[9px] font-bold uppercase">Add Shop</button>
-                                        </div>
-                                        <div className="space-y-3">
-                                            <h2 className="text-[10px] uppercase font-bold text-purple-400 tracking-widest">Bounties & Data</h2>
-                                            <input className="w-full p-2 text-[10px]" placeholder="Quick Bounty..." value={newBounty} onChange={e => setNewBounty(e.target.value)} />
-                                            <button onClick={() => { if (!newBounty) return; sync({ reminders: [...(guildData.reminders || []), {id: Date.now(), text: newBounty, status: 'active'}] }); setNewBounty(""); }} className="w-full py-2 bg-zinc-800 text-[9px] font-bold uppercase">Post Bounty (+10G)</button>
-                                            <button onClick={exportLedger} className="w-full py-1 border border-zinc-700 text-[8px] uppercase">{archiveStatus || 'Export Scroll'}</button>
-                                            <textarea className="w-full h-8 text-[7px] p-1" placeholder="Paste data..." onChange={e => setImportText(e.target.value)} />
-                                            <button onClick={restoreLedger} className="w-full py-1 text-[8px] bg-zinc-900 border border-zinc-700 uppercase">Restore</button>
+
+                                        {/* MANUAL POINT ADJUSTMENT PANEL */}
+                                        <div className="p-6 border border-amber-500/30 bg-black/60">
+                                            <h2 className="text-[10px] uppercase font-bold text-amber-500 tracking-[0.2em] mb-4 flex items-center gap-2">
+                                                <Icon name="Settings2" size={14} /> Manual Ledger Overrides
+                                            </h2>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                                <div className="space-y-2 border-r border-zinc-800 pr-4">
+                                                    <span className="text-[9px] font-bold text-zinc-500 uppercase">Guild (Family)</span>
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-[10px]">Gold</span>
+                                                        <div className="flex gap-1">
+                                                            <button onClick={()=>adjustManual('Family', 'gp', -10)} className="w-8 py-1 bg-red-900/30 text-xs border border-red-900">-10</button>
+                                                            <button onClick={()=>adjustManual('Family', 'gp', 10)} className="w-8 py-1 bg-green-900/30 text-xs border border-green-900">+10</button>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-[10px]">XP</span>
+                                                        <div className="flex gap-1">
+                                                            <button onClick={()=>adjustManual('Family', 'xp', -50)} className="w-8 py-1 bg-red-900/30 text-xs border border-red-900">-50</button>
+                                                            <button onClick={()=>adjustManual('Family', 'xp', 50)} className="w-8 py-1 bg-green-900/30 text-xs border border-green-900">+50</button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                {guildData.members.map(m => (
+                                                    <div key={m.id} className="space-y-2 border-r last:border-0 border-zinc-800 pr-4">
+                                                        <span className="text-[9px] font-bold text-zinc-300 uppercase">{m.name}</span>
+                                                        <div className="flex items-center justify-between">
+                                                            <span className="text-[10px]">Gold</span>
+                                                            <div className="flex gap-1">
+                                                                <button onClick={()=>adjustManual(m.id, 'gp', -5)} className="w-8 py-1 bg-zinc-800 text-xs hover:bg-zinc-700">-5</button>
+                                                                <button onClick={()=>adjustManual(m.id, 'gp', 5)} className="w-8 py-1 bg-zinc-800 text-xs hover:bg-zinc-700">+5</button>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center justify-between">
+                                                            <span className="text-[10px]">XP</span>
+                                                            <div className="flex gap-1">
+                                                                <button onClick={()=>adjustManual(m.id, 'xp', -20)} className="w-8 py-1 bg-zinc-800 text-xs hover:bg-zinc-700">-20</button>
+                                                                <button onClick={()=>adjustManual(m.id, 'xp', 20)} className="w-8 py-1 bg-zinc-800 text-xs hover:bg-zinc-700">+20</button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
                                         </div>
                                     </div>
                                 )}
