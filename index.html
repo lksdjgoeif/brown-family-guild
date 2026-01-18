@@ -50,7 +50,18 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // --- USER CONFIG ---
+        // --- UPDATED ECONOMY CONFIG ---
+        const TIER_COSTS = { 
+            Common: 40, 
+            Unusual: 100, 
+            Rare: 400, 
+            Epic: 1000, 
+            Legendary: 2500, 
+            Mythic: 6000 
+        };
+
+        const rooms_list = ["Kitchen", "Upstairs Bath", "Downstairs Bath", "Laundry Room", "Dining Room", "Living Room", "Eric's Office", "Catie's Office", "Theatre Room", "Rory's Room", "Olive's Room", "Primary Bedroom", "Playroom", "General"];
+
         const firebaseConfig = {
           apiKey: "AIzaSyB7pIt45QRtW11r5i-PCl_5LhI_clqGr0s",
           authDomain: "brown-family-guild.firebaseapp.com",
@@ -59,9 +70,6 @@
           messagingSenderId: "894794378412",
           appId: "1:894794378412:web:cc1b03ed950c9629ebc309"
         };
-
-        const TIER_COSTS = { Common: 10, Unusual: 25, Rare: 100, Epic: 400, Legendary: 1000, Mythic: 2500 };
-        const rooms_list = ["Kitchen", "Upstairs Bath", "Downstairs Bath", "Laundry Room", "Dining Room", "Living Room", "Eric's Office", "Catie's Office", "Theatre Room", "Rory's Room", "Olive's Room", "Primary Bedroom", "Playroom", "General"];
 
         const Icon = ({ name, size = 20, className = "" }) => {
             const [iconData, setIconData] = useState(null);
@@ -123,7 +131,6 @@
                 menu: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => ({ day: d, meal: 'TBD' }))
             });
 
-            // ARCHITECT FORM STATES
             const [newQuest, setNewQuest] = useState({ title: '', type: 'daily', assignedTo: 'Family', targetValue: 10, unit: 'pts' });
             const [newCleaning, setNewCleaning] = useState({ title: '', room: 'Kitchen', type: 'daily' });
             const [newReward, setNewReward] = useState({ label: '', rarity: 'Common', owner: 'Family' });
@@ -147,12 +154,9 @@
                 const guildDoc = window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'guildState', 'master');
                 
                 const unsubscribe = window.FB.onSnapshot(guildDoc, (snapshot) => {
-                    if (snapshot.exists()) {
-                        setGuildData(snapshot.data());
-                    } else {
-                        window.FB.setDoc(guildDoc, guildData);
-                    }
-                }, (err) => console.error("Firebase Error:", err));
+                    if (snapshot.exists()) { setGuildData(snapshot.data()); } 
+                    else { window.FB.setDoc(guildDoc, guildData); }
+                }, (err) => console.error(err));
                 return () => unsubscribe();
             }, [user, db]);
 
@@ -168,6 +172,7 @@
                 const q = guildData.quests.find(x => x.id === id);
                 if (!q || q.status === 'completed') return;
                 const newQuests = guildData.quests.map(x => x.id === id ? { ...x, status: 'completed' } : x);
+                
                 const update = { quests: newQuests, familyXP: Number(guildData.familyXP || 0) + (q.xp || 20) };
                 if (q.assignedTo === 'Family') update.familyGold = Number(guildData.familyGold || 0) + (q.reward || 10);
                 else update.members = guildData.members.map(m => m.id === q.assignedTo ? { ...m, gp: Number(m.gp || 0) + (q.reward || 10) } : m);
@@ -202,13 +207,8 @@
                 sync({ reminders: newReminders, familyGold: Number(guildData.familyGold || 0) + 10, familyXP: Number(guildData.familyXP || 0) + 10 });
             };
 
-            const deleteQuest = (id) => {
-                sync({ quests: guildData.quests.filter(x => x.id !== id) });
-            };
-
-            const deleteBounty = (id) => {
-                sync({ reminders: guildData.reminders.filter(x => x.id !== id) });
-            };
+            const deleteQuest = (id) => sync({ quests: guildData.quests.filter(x => x.id !== id) });
+            const deleteBounty = (id) => sync({ reminders: guildData.reminders.filter(x => x.id !== id) });
 
             const monthlyReset = () => {
                 const resetQuests = guildData.quests.map(q => {
@@ -291,13 +291,15 @@
                                                 <option value="Family">Guild Wide</option>{guildData.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                                             </select>
                                             <select className="w-full p-2 text-[10px]" value={newQuest.type} onChange={e => setNewQuest({...newQuest, type: e.target.value})}>
-                                                <option value="daily">Daily</option>
-                                                <option value="weekly">Weekly</option>
-                                                <option value="monthly">Monthly</option>
-                                                <option value="campaign">Campaign</option>
+                                                <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="campaign">Campaign</option>
                                             </select>
                                             {newQuest.type === 'campaign' && <div className="flex gap-1 animate-in slide-in-from-left-1"><input className="w-1/2 p-2 text-[10px]" type="number" placeholder="Target" onChange={e => setNewQuest({...newQuest, targetValue: Number(e.target.value)})} /><input className="w-1/2 p-2 text-[10px]" placeholder="Unit" onChange={e => setNewQuest({...newQuest, unit: e.target.value})} /></div>}
-                                            <button onClick={() => sync({ quests: [...guildData.quests, {...newQuest, id: Date.now(), status: 'active', currentValue: 0, reward: newQuest.type === 'campaign' ? 500 : 50, xp: newQuest.type === 'campaign' ? 1000 : 100, category: 'Personal'}]})} className="w-full py-2 bg-zinc-800 text-[9px] font-bold uppercase hover:bg-zinc-700">Add Mission</button>
+                                            <button onClick={() => {
+                                                const rewardsMap = { daily: {gp: 10, xp: 20}, weekly: {gp: 60, xp: 120}, monthly: {gp: 250, xp: 500}, campaign: {gp: 1000, xp: 2000} };
+                                                const r = rewardsMap[newQuest.type] || rewardsMap.daily;
+                                                sync({ quests: [...guildData.quests, {...newQuest, id: Date.now(), status: 'active', currentValue: 0, reward: r.gp, xp: r.xp, category: 'Personal'}]});
+                                                setNewQuest({ title: '', type: 'daily', assignedTo: 'Family', targetValue: 10, unit: 'pts' });
+                                            }} className="w-full py-2 bg-zinc-800 text-[9px] font-bold uppercase hover:bg-zinc-700">Add Mission</button>
                                         </div>
                                         <div className="space-y-3">
                                             <h2 className="text-[10px] uppercase font-bold text-emerald-400 tracking-widest">Sanctuary</h2>
@@ -306,12 +308,10 @@
                                                 {rooms_list.map(r => <option key={r} value={r}>{r}</option>)}
                                             </select>
                                             <select className="w-full p-2 text-[10px]" value={newCleaning.type} onChange={e => setNewCleaning({...newCleaning, type: e.target.value})}>
-                                                <option value="daily">Daily</option>
-                                                <option value="weekly">Weekly</option>
-                                                <option value="monthly">Monthly</option>
+                                                <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
                                             </select>
                                             <button onClick={() => {
-                                                const rewardsMap = { daily: { gp: 5, xp: 10 }, weekly: { gp: 50, xp: 100 }, monthly: { gp: 200, xp: 400 } };
+                                                const rewardsMap = { daily: { gp: 5, xp: 10 }, weekly: { gp: 30, xp: 60 }, monthly: { gp: 125, xp: 250 } };
                                                 const tier = rewardsMap[newCleaning.type] || rewardsMap.daily;
                                                 sync({ quests: [...guildData.quests, {...newCleaning, id: Date.now(), assignedTo: 'Family', category: 'Cleaning', status: 'active', reward: tier.gp, xp: tier.xp}]});
                                             }} className="w-full py-2 bg-zinc-800 text-[9px] font-bold uppercase hover:bg-zinc-700">Add Task</button>
@@ -332,8 +332,8 @@
                                         <div className="space-y-3">
                                             <h2 className="text-[10px] uppercase font-bold text-purple-400 tracking-widest">Bounties & Data</h2>
                                             <input className="w-full p-2 text-[10px]" placeholder="Quick Bounty..." value={newBounty} onChange={e => setNewBounty(e.target.value)} />
-                                            <button onClick={() => { if (!newBounty) return; sync({ reminders: [...(guildData.reminders || []), {id: Date.now(), text: newBounty, status: 'active'}] }); setNewBounty(""); }} className="w-full py-2 bg-zinc-800 text-[9px] font-bold uppercase">Post Bounty</button>
-                                            <button onClick={exportLedger} className="w-full py-1 border border-zinc-700 text-[8px] uppercase">{archiveStatus || 'Export Scroll'}</button>
+                                            <button onClick={() => { if (!newBounty) return; sync({ reminders: [...(guildData.reminders || []), {id: Date.now(), text: newBounty, status: 'active'}] }); setNewBounty(""); }} className="w-full py-2 bg-zinc-800 text-[9px] font-bold uppercase">Post Bounty (+10G)</button>
+                                            <button onClick={exportLedger} className="w-full py-1 border border-zinc-700 text-[8px] uppercase">{archiveStatus || 'Export Ledger'}</button>
                                             <textarea className="w-full h-8 text-[7px] p-1" placeholder="Paste data..." onChange={e => setImportText(e.target.value)} />
                                             <button onClick={restoreLedger} className="w-full py-1 text-[8px] bg-zinc-900 border border-zinc-700 uppercase">Restore</button>
                                         </div>
