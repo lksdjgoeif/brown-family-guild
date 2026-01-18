@@ -12,9 +12,9 @@
     <!-- Firebase App/Auth/Firestore -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        window.FB = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, onSnapshot, updateDoc };
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        window.FB = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, doc, setDoc, onSnapshot, updateDoc, getDoc };
     </script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Cinzel:wght@400;700&display=swap');
@@ -30,6 +30,7 @@
             color: var(--skyrim-silver);
             background-image: radial-gradient(circle at center, #1e1e1e 0%, #0f0f0f 100%);
             margin: 0;
+            overflow-x: hidden;
         }
         .rpg-title { font-family: 'Cinzel', serif; letter-spacing: 0.1em; text-transform: uppercase; }
         .skyrim-progress-bg { background: rgba(0, 0, 0, 0.5); height: 2px; position: relative; }
@@ -38,7 +39,7 @@
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #444; border-radius: 10px; }
-        .char-card { transition: all 0.3s; background: rgba(30, 30, 30, 0.6); border: 1px solid var(--skyrim-border); }
+        .char-card { transition: all 0.3s; background: rgba(30, 30, 30, 0.6); border: 1px solid var(--skyrim-border); cursor: pointer; }
         .char-card.active { border-color: var(--skyrim-accent); background: rgba(50, 50, 50, 0.8); }
         input, select, textarea { background: rgba(0,0,0,0.5) !important; border: 1px solid #333 !important; color: white !important; }
     </style>
@@ -48,6 +49,16 @@
 
     <script type="text/babel">
         const { useState, useEffect } = React;
+
+        // --- USER CONFIG ---
+        const firebaseConfig = {
+          apiKey: "AIzaSyB7pIt45QRtW11r5i-PCl_5LhI_clqGr0s",
+          authDomain: "brown-family-guild.firebaseapp.com",
+          projectId: "brown-family-guild",
+          storageBucket: "brown-family-guild.firebasestorage.app",
+          messagingSenderId: "894794378412",
+          appId: "1:894794378412:web:cc1b03ed950c9629ebc309"
+        };
 
         const TIER_COSTS = { Common: 10, Unusual: 25, Rare: 100, Epic: 400, Legendary: 1000, Mythic: 2500 };
         const rooms_list = ["Kitchen", "Upstairs Bath", "Downstairs Bath", "Laundry Room", "Dining Room", "Living Room", "Eric's Office", "Catie's Office", "Theatre Room", "Rory's Room", "Olive's Room", "Primary Bedroom", "General"];
@@ -112,7 +123,6 @@
                 menu: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => ({ day: d, meal: 'TBD' }))
             });
 
-            // Form inputs
             const [newQuest, setNewQuest] = useState({ title: '', type: 'daily', assignedTo: 'Family', targetValue: 10, unit: 'pts' });
             const [newCleaning, setNewCleaning] = useState({ title: '', room: 'Kitchen', type: 'daily' });
             const [newReward, setNewReward] = useState({ label: '', rarity: 'Common', owner: 'Family' });
@@ -120,19 +130,13 @@
 
             useEffect(() => {
                 const init = async () => {
-                    const cfg = JSON.parse(window.__firebase_config || '{}');
-                    const app = window.FB.initializeApp(cfg);
+                    const app = window.FB.initializeApp(firebaseConfig);
                     const auth = window.FB.getAuth(app);
                     const firestore = window.FB.getFirestore(app);
                     setDb(firestore);
                     
-                    // RULE 3 - Auth Before Queries
-                    if (window.__initial_auth_token) {
-                        await window.FB.signInWithCustomToken(auth, window.__initial_auth_token);
-                    } else {
-                        await window.FB.signInAnonymously(auth);
-                    }
-                    
+                    // RULE 3 - Auth First
+                    await window.FB.signInAnonymously(auth);
                     window.FB.onAuthStateChanged(auth, setUser);
                 };
                 init();
@@ -140,29 +144,27 @@
 
             useEffect(() => {
                 if (!user || !db) return;
-                const appId = window.__app_id || 'brown-family-guild';
-                // RULE 1 - Strict Paths
+                const appId = 'brown-family-guild';
+                // RULE 1 - Even segments (6)
                 const guildDoc = window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'guildState', 'master');
                 
                 const unsubscribe = window.FB.onSnapshot(guildDoc, (snapshot) => {
                     if (snapshot.exists()) {
                         setGuildData(snapshot.data());
                     } else {
-                        // Guard every Firestore operation with if (!user) return;
                         window.FB.setDoc(guildDoc, guildData);
                     }
-                }, (err) => console.error("Firestore Permission/Path Error:", err));
+                }, (err) => console.error("Firestore Permission Error:", err));
                 return () => unsubscribe();
             }, [user, db]);
 
             const sync = async (update) => {
                 if (!user || !db) return;
-                const appId = window.__app_id || 'brown-family-guild';
+                const appId = 'brown-family-guild';
                 const guildDoc = window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'guildState', 'master');
                 try {
                     await window.FB.updateDoc(guildDoc, update);
                 } catch (e) {
-                    // Fallback to setDoc merge if updateDoc fails (e.g. if doc doesn't fully exist yet)
                     await window.FB.setDoc(guildDoc, update, { merge: true });
                 }
             };
@@ -171,16 +173,16 @@
                 const q = guildData.quests.find(x => x.id === id);
                 if (!q || q.status === 'completed') return;
                 const newQuests = guildData.quests.map(x => x.id === id ? { ...x, status: 'completed' } : x);
-                const update = { quests: newQuests, familyXP: (guildData.familyXP || 0) + (q.xp || 20) };
-                if (q.assignedTo === 'Family') update.familyGold = (guildData.familyGold || 0) + (q.reward || 10);
-                else update.members = guildData.members.map(m => m.id === q.assignedTo ? { ...m, gp: (m.gp || 0) + (q.reward || 10) } : m);
+                const update = { quests: newQuests, familyXP: Number(guildData.familyXP || 0) + (q.xp || 20) };
+                if (q.assignedTo === 'Family') update.familyGold = Number(guildData.familyGold || 0) + (q.reward || 10);
+                else update.members = guildData.members.map(m => m.id === q.assignedTo ? { ...m, gp: Number(m.gp || 0) + (q.reward || 10) } : m);
                 sync(update);
             };
 
             const updateEpic = (id, amt) => {
                 const newQuests = guildData.quests.map(x => {
                     if (x.id === id) {
-                        const val = Math.min((x.currentValue || 0) + amt, x.targetValue || 10);
+                        const val = Math.min(Number(x.currentValue || 0) + amt, Number(x.targetValue || 10));
                         return { ...x, currentValue: val };
                     }
                     return x;
@@ -192,8 +194,8 @@
                 const rooms = guildData.claimedBonuses?.rooms || [];
                 if (rooms.includes(room)) return;
                 sync({ 
-                    familyGold: (guildData.familyGold || 0) + 50, 
-                    familyXP: (guildData.familyXP || 0) + 100,
+                    familyGold: Number(guildData.familyGold || 0) + 50, 
+                    familyXP: Number(guildData.familyXP || 0) + 100,
                     claimedBonuses: { ...guildData.claimedBonuses, rooms: [...rooms, room] }
                 });
             };
@@ -214,18 +216,22 @@
                 if (!user || !db) return;
                 try {
                     const data = JSON.parse(importText);
-                    const appId = window.__app_id || 'brown-family-guild';
+                    const appId = 'brown-family-guild';
                     await window.FB.setDoc(window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'guildState', 'master'), data);
                     setArchiveStatus("Synced!");
                     setImportText("");
-                } catch(e) { alert("Corrupted scroll."); }
+                } catch(e) { alert("Scroll Corruption Detected."); }
             };
 
             const filteredQuests = (guildData.quests || []).filter(q => q.category !== 'Cleaning' && q.type !== 'epic' && (activeFilter === 'All' || q.assignedTo === activeFilter));
             const filteredEpics = (guildData.quests || []).filter(q => q.type === 'epic' && (activeFilter === 'All' || q.assignedTo === activeFilter));
-            const globalPercent = guildData.quests.filter(q => q.category === 'Cleaning').length ? Math.round((guildData.quests.filter(q => q.category === 'Cleaning' && q.status === 'completed').length / guildData.quests.filter(q => q.category === 'Cleaning').length) * 100) : 0;
+            const cTasks = (guildData.quests || []).filter(q => q.category === 'Cleaning');
+            const globalPercent = cTasks.length ? Math.round((cTasks.filter(q => q.status === 'completed').length / cTasks.length) * 100) : 0;
 
-            if (!user) return <div className="h-screen bg-black flex items-center justify-center text-amber-500 rpg-title">Loading Skyrim...</div>;
+            if (!user) return <div className="h-screen bg-black flex flex-col items-center justify-center text-amber-500 rpg-title">
+                <Icon name="Crown" size={48} className="mb-4 animate-pulse" />
+                Loading Skyrim...
+            </div>;
 
             return (
                 <div className="min-h-screen p-4 md:p-8">
@@ -237,16 +243,16 @@
                                         <Icon name="Crown" size={32} /> Brown Family Guild Hall
                                     </h1>
                                     <div className="flex items-center gap-3 mt-2">
-                                        <span className="text-[10px] uppercase font-bold text-zinc-500">Level {Math.floor(guildData.familyXP/1000)}</span>
-                                        <div className="w-48 skyrim-progress-bg"><div className="skyrim-progress-fill" style={{ width: `${(guildData.familyXP % 1000) / 10}%` }}></div></div>
+                                        <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Level {Math.floor(Number(guildData.familyXP || 0)/1000)}</span>
+                                        <div className="w-48 skyrim-progress-bg"><div className="skyrim-progress-fill" style={{ width: `${(Number(guildData.familyXP || 0) % 1000) / 10}%` }}></div></div>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-4">
                                     <div className="text-right">
                                         <div className="text-[10px] uppercase font-bold text-zinc-500">Treasury</div>
-                                        <div className="text-amber-500 font-bold flex items-center gap-1"><Icon name="Coins" size={16} /> {String(guildData.familyGold || 0)} GP</div>
+                                        <div className="text-amber-500 font-bold flex items-center gap-1 text-lg"><Icon name="Coins" size={16} /> {String(guildData.familyGold || 0)} GP</div>
                                     </div>
-                                    <button onClick={() => setIsMeetingMode(!isMeetingMode)} className="px-4 py-2 border border-zinc-700 text-[10px] uppercase tracking-widest text-zinc-400 hover:text-white">
+                                    <button onClick={() => setIsMeetingMode(!isMeetingMode)} className={`px-4 py-2 border ${isMeetingMode ? 'border-amber-500 text-amber-500' : 'border-zinc-700 text-zinc-400 hover:text-white'} text-[10px] uppercase tracking-widest transition-all`}>
                                         {isMeetingMode ? 'End Council' : 'Strategic Planning'}
                                     </button>
                                 </div>
@@ -257,7 +263,7 @@
                                     <Icon name="LayoutGrid" size={24} />
                                     <span className="text-[10px] uppercase font-bold mt-1">General</span>
                                 </button>
-                                {guildData.members.map(m => (
+                                {(guildData.members || []).map(m => (
                                     <button key={m.id} onClick={() => setActiveFilter(m.id)} className={`char-card flex-1 min-w-[140px] p-4 text-left ${activeFilter === m.id ? 'active' : ''}`}>
                                         <div className="flex items-center gap-3 mb-2">
                                             <Avatar id={m.id} />
@@ -273,33 +279,33 @@
                             <div className="lg:col-span-2 space-y-12">
                                 
                                 {isMeetingMode && (
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border border-amber-900/30 p-6 bg-black/40">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border border-amber-900/30 p-6 bg-black/40 animate-in fade-in slide-in-from-top-2">
                                         <div className="space-y-4">
-                                            <h2 className="text-[10px] uppercase font-bold text-blue-400">Add Mission</h2>
-                                            <input className="w-full p-2 text-xs" placeholder="Task..." value={newQuest.title} onChange={e => setNewQuest({...newQuest, title: e.target.value})} />
+                                            <h2 className="text-[10px] uppercase font-bold text-blue-400">Summon Mission</h2>
+                                            <input className="w-full p-2 text-xs" placeholder="Goal name..." value={newQuest.title} onChange={e => setNewQuest({...newQuest, title: e.target.value})} />
                                             <select className="w-full p-2 text-xs" value={newQuest.type} onChange={e => setNewQuest({...newQuest, type: e.target.value})}>
-                                                <option value="daily">Daily</option><option value="epic">Legendary Campaign</option>
+                                                <option value="daily">Daily Task</option><option value="epic">Legendary Campaign</option>
                                             </select>
                                             {newQuest.type === 'epic' && (
                                                 <div className="flex gap-2">
-                                                    <input className="w-1/2 p-2 text-xs" placeholder="Target" type="number" onChange={e => setNewQuest({...newQuest, targetValue: Number(e.target.value)})} />
-                                                    <input className="w-1/2 p-2 text-xs" placeholder="Unit" onChange={e => setNewQuest({...newQuest, unit: e.target.value})} />
+                                                    <input className="w-1/2 p-2 text-xs" placeholder="Target (10)" type="number" value={newQuest.targetValue} onChange={e => setNewQuest({...newQuest, targetValue: Number(e.target.value)})} />
+                                                    <input className="w-1/2 p-2 text-xs" placeholder="Unit (lbs)" value={newQuest.unit} onChange={e => setNewQuest({...newQuest, unit: e.target.value})} />
                                                 </div>
                                             )}
                                             <button onClick={async () => {
-                                                const q = {...newQuest, id: Date.now(), status: 'active', currentValue: 0, reward: 10, xp: 20, category: 'Personal'};
+                                                const q = {...newQuest, id: Date.now(), status: 'active', currentValue: 0, reward: 50, xp: 100, category: 'Personal'};
                                                 await sync({ quests: [...guildData.quests, q] });
                                                 setNewQuest({ title: '', type: 'daily', assignedTo: 'Family', targetValue: 10, unit: 'pts' });
-                                            }} className="w-full py-2 bg-zinc-800 text-[10px] uppercase font-bold hover:bg-zinc-700">Summon</button>
+                                            }} className="w-full py-2 bg-zinc-800 text-[10px] uppercase font-bold hover:bg-zinc-700">Add to Log</button>
                                         </div>
                                         <div className="space-y-4">
                                             <h2 className="text-[10px] uppercase font-bold text-emerald-400">Archives</h2>
                                             <button onClick={exportLedger} className="w-full py-2 border border-zinc-700 text-[10px] uppercase">{archiveStatus || 'Export Ledger'}</button>
-                                            <textarea className="w-full h-12 text-[8px] p-2" placeholder="Paste ledger to restore..." value={importText} onChange={e => setImportText(e.target.value)} />
-                                            <button onClick={restoreLedger} className="w-full py-2 bg-zinc-800 text-[10px] uppercase">Restore</button>
+                                            <textarea className="w-full h-12 text-[8px] p-2" placeholder="Paste ledger..." value={importText} onChange={e => setImportText(e.target.value)} />
+                                            <button onClick={restoreLedger} className="w-full py-2 bg-zinc-800 text-[10px] uppercase">Restore State</button>
                                         </div>
                                         <div className="space-y-4">
-                                            <h2 className="text-[10px] uppercase font-bold text-amber-400">Cleanup</h2>
+                                            <h2 className="text-[10px] uppercase font-bold text-red-400">Safety</h2>
                                             <button onClick={() => sync({ claimedBonuses: { rooms: [], sanctuary: false }, quests: guildData.quests.map(q => q.category === 'Cleaning' ? {...q, status: 'active'} : q)})} className="w-full py-2 border border-red-900 text-red-500 text-[10px] uppercase">Monthly Reset</button>
                                         </div>
                                     </div>
@@ -314,10 +320,10 @@
                                                     <div><h3 className="text-sm font-bold text-white uppercase">{String(q.title)}</h3><span className="text-[9px] text-zinc-500 uppercase">{String(q.assignedTo)}</span></div>
                                                     <span className="text-xs font-bold text-zinc-400">{String(q.currentValue || 0)}/{String(q.targetValue || 10)} {String(q.unit || '')}</span>
                                                 </div>
-                                                <div className="skyrim-progress-bg mb-6"><div className="skyrim-progress-fill amber" style={{ width: `${((q.currentValue || 0) / (q.targetValue || 10)) * 100}%` }}></div></div>
+                                                <div className="skyrim-progress-bg mb-6"><div className="skyrim-progress-fill amber" style={{ width: `${((Number(q.currentValue || 0)) / (Number(q.targetValue || 1))) * 100}%` }}></div></div>
                                                 <div className="flex gap-2">
-                                                    <button onClick={() => updateEpic(q.id, 1)} className="flex-1 py-1 border border-zinc-800 text-[9px] uppercase font-bold hover:border-zinc-500">+1</button>
-                                                    {isMeetingMode && <button onClick={() => sync({ quests: guildData.quests.filter(x => x.id !== q.id) })} className="p-2 text-red-900"><Icon name="Trash2" size={14} /></button>}
+                                                    <button onClick={() => updateEpic(q.id, 1)} className="flex-1 py-1 border border-zinc-800 text-[9px] uppercase font-bold hover:border-zinc-500 transition-all">+1 Progress</button>
+                                                    {isMeetingMode && <button onClick={() => sync({ quests: guildData.quests.filter(x => x.id !== q.id) })} className="p-2 text-red-900 hover:text-red-500"><Icon name="Trash2" size={14} /></button>}
                                                 </div>
                                             </div>
                                         ))}
@@ -326,25 +332,25 @@
 
                                 <section className="space-y-6">
                                     <div className="flex justify-between items-end"><h2 className="rpg-title text-xl font-bold text-white uppercase tracking-widest">Sanctuary</h2><div className="text-right text-[10px] uppercase font-bold text-zinc-500">Clearance: {globalPercent}%</div></div>
-                                    <div className="max-h-[250px] overflow-y-auto pr-4 custom-scrollbar grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="max-h-[300px] overflow-y-auto pr-4 custom-scrollbar grid grid-cols-1 md:grid-cols-2 gap-4">
                                         {rooms_list.map(room => {
-                                            const rQuests = guildData.quests.filter(q => q.room === room);
+                                            const rQuests = (guildData.quests || []).filter(q => q.room === room);
                                             const rPercent = rQuests.length ? Math.round((rQuests.filter(q => q.status === 'completed').length / rQuests.length) * 100) : 0;
                                             const cleared = rPercent === 100;
                                             return (
-                                                <div key={room} className={`p-4 border ${cleared ? 'border-amber-900 bg-amber-950/10' : 'border-zinc-800 bg-black/20'}`}>
+                                                <div key={room} className={`p-4 border ${cleared ? 'border-amber-900 bg-amber-950/10' : 'border-zinc-800 bg-black/20'} transition-all`}>
                                                     <div className="flex justify-between mb-2"><h3 className={`text-[10px] uppercase font-bold ${cleared ? 'text-amber-500' : 'text-zinc-300'}`}>{String(room)}</h3><span className="text-[9px] text-zinc-500">{rPercent}%</span></div>
-                                                    <div className="skyrim-progress-bg mb-3"><div className={`h-full ${cleared ? 'bg-amber-500' : 'bg-white/30'}`} style={{ width: `${rPercent}%` }}></div></div>
+                                                    <div className="skyrim-progress-bg mb-3"><div className={`h-full ${cleared ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : 'bg-white/30'}`} style={{ width: `${rPercent}%` }}></div></div>
                                                     <div className="space-y-1">
                                                         {rQuests.map(q => (
                                                             <div key={q.id} className="flex items-center gap-2 text-[9px] group">
                                                                 <button onClick={() => completeQuest(q.id)} className={`p-0.5 border ${q.status === 'completed' ? 'border-amber-500 text-amber-500' : 'border-zinc-700'}`}><Icon name="Check" size={8} /></button>
                                                                 <span className={`truncate ${q.status === 'completed' ? 'line-through text-zinc-600' : 'text-zinc-400'}`}>{String(q.title)}</span>
-                                                                {isMeetingMode && <button onClick={() => sync({ quests: guildData.quests.filter(x => x.id !== q.id)})} className="ml-auto text-red-900 opacity-0 group-hover:opacity-100"><Icon name="Trash2" size={10} /></button>}
+                                                                {isMeetingMode && <button onClick={() => sync({ quests: guildData.quests.filter(x => x.id !== q.id)})} className="ml-auto text-red-900 opacity-0 group-hover:opacity-100 transition-opacity"><Icon name="Trash2" size={10} /></button>}
                                                             </div>
                                                         ))}
                                                     </div>
-                                                    {cleared && !(guildData.claimedBonuses?.rooms || []).includes(room) && <button onClick={() => claimRoom(room)} className="mt-3 w-full border border-amber-700 text-amber-600 text-[8px] font-bold py-1 uppercase">Collect Bonus (+50G)</button>}
+                                                    {cleared && !(guildData.claimedBonuses?.rooms || []).includes(room) && <button onClick={() => claimRoom(room)} className="mt-3 w-full border border-amber-700 text-amber-600 text-[8px] font-bold py-1 uppercase hover:bg-amber-700 hover:text-black transition-all">Collect Bonus (+50G)</button>}
                                                 </div>
                                             );
                                         })}
@@ -357,11 +363,13 @@
                                         {filteredQuests.map(q => (
                                             <div key={q.id} className={`flex items-center justify-between p-4 border ${q.status === 'completed' ? 'border-zinc-900 opacity-50' : 'border-zinc-800 bg-black/40'}`}>
                                                 <div className="flex items-center gap-4">
-                                                    <Icon name={q.status === 'completed' ? 'CheckCircle' : 'Zap'} size={18} />
-                                                    <div><h3 className="text-xs font-bold uppercase text-white">{String(q.title)}</h3><div className="text-[9px] font-bold text-zinc-500">{String(q.assignedTo)} • +{String(q.reward)} GP</div></div>
+                                                    <Icon name={q.status === 'completed' ? 'CheckCircle' : 'Zap'} size={18} className={q.status === 'completed' ? 'text-zinc-700' : 'text-zinc-400'} />
+                                                    <div><h3 className="text-xs font-bold uppercase text-white tracking-wider">{String(q.title)}</h3><div className="text-[9px] font-bold text-zinc-500">{String(q.assignedTo)} • +{String(q.reward || 0)} GP</div></div>
                                                 </div>
-                                                {q.status === 'active' && <button onClick={() => completeQuest(q.id)} className="text-[9px] uppercase font-bold border border-zinc-700 px-4 py-1 hover:border-white">Claim</button>}
-                                                {isMeetingMode && <button onClick={() => sync({ quests: guildData.quests.filter(x => x.id !== q.id)})} className="text-red-900"><Icon name="Trash2" size={14} /></button>}
+                                                <div className="flex items-center gap-2">
+                                                    {q.status === 'active' && <button onClick={() => completeQuest(q.id)} className="text-[9px] uppercase font-bold border border-zinc-700 px-4 py-1 hover:border-white transition-all">Claim</button>}
+                                                    {isMeetingMode && <button onClick={() => sync({ quests: guildData.quests.filter(x => x.id !== q.id)})} className="text-red-900 p-2"><Icon name="Trash2" size={14} /></button>}
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
@@ -374,10 +382,10 @@
                                     <div className="space-y-4">
                                         {(guildData.menu || []).map((m, i) => (
                                             <div key={i} className="flex flex-col gap-1">
-                                                <span className="text-[9px] font-bold text-zinc-500 uppercase">{String(m.day)}</span>
-                                                {isMeetingMode ? <input className="bg-black/60 p-1 text-xs text-white" value={String(m.meal || '')} onChange={e => {
+                                                <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">{String(m.day)}</span>
+                                                {isMeetingMode ? <input className="bg-black/60 p-1 text-xs text-white border border-zinc-800" value={String(m.meal || '')} onChange={e => {
                                                     const nm = [...guildData.menu];
-                                                    nm[i].meal = e.target.value;
+                                                    nm[i] = {...nm[i], meal: e.target.value};
                                                     sync({ menu: nm });
                                                 }} /> : <span className="text-xs font-bold uppercase tracking-widest text-zinc-300">{String(m.meal || 'TBD')}</span>}
                                             </div>
@@ -395,7 +403,7 @@
                                                     <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-4 border-l border-amber-900 pl-2">{String(owner === 'Family' ? 'Guild Vault' : owner)}</div>
                                                     <div className="space-y-3">
                                                         {(items || []).map(r => (
-                                                            <div key={r.label} className="group flex justify-between items-center border-b border-zinc-900 pb-2">
+                                                            <div key={r.label} className="group flex justify-between items-center border-b border-zinc-900 pb-2 hover:bg-white/5 transition-all px-1">
                                                                 <div><div className="text-xs font-bold text-white uppercase">{String(r.label)}</div><div className="text-[8px] uppercase text-zinc-500">{String(r.rarity)}</div></div>
                                                                 <div className="flex items-center gap-2"><span className="text-amber-500 text-xs font-bold">{String(r.cost)} GP</span>{isMeetingMode && <button onClick={() => {
                                                                     const upd = {...guildData.rewards};
