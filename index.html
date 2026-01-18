@@ -34,7 +34,7 @@
         }
         .rpg-title { font-family: 'Cinzel', serif; letter-spacing: 0.1em; text-transform: uppercase; }
         .skyrim-progress-bg { background: rgba(0, 0, 0, 0.5); height: 2px; position: relative; }
-        .skyrim-progress-fill { height: 100%; background: var(--skyrim-silver); box-shadow: 0 0 8px var(--skyrim-silver); transition: width 1s ease-out; }
+        .skyrim-progress-fill { height: 100%; background: var(--skyrim-silver); box-shadow: 0 0 8px var(--skyrim-silver); transition: width 0.5s ease-out; }
         .skyrim-progress-fill.amber { background: var(--skyrim-accent); box-shadow: 0 0 8px var(--skyrim-accent); }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
@@ -50,15 +50,14 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // --- UPDATED ECONOMY CONFIG ---
-        const TIER_COSTS = { 
-            Common: 40, 
-            Unusual: 100, 
-            Rare: 400, 
-            Epic: 1000, 
-            Legendary: 2500, 
-            Mythic: 6000 
-        };
+        // --- ECONOMY & LEVELING CONFIG ---
+        const TIER_COSTS = { Common: 40, Unusual: 100, Rare: 400, Epic: 1000, Legendary: 2500, Mythic: 6000 };
+        const MISSION_REWARDS = { daily: 10, weekly: 60, monthly: 250, campaign: 1000 };
+        const XP_REWARDS = { daily: 20, weekly: 120, monthly: 500, campaign: 2000 };
+
+        // RPG Leveling Math: Level = floor(sqrt(xp/50)) + 1
+        const getLevel = (xp) => Math.floor(Math.sqrt((xp || 0) / 50)) + 1;
+        const getXPForLevel = (lvl) => Math.pow(lvl - 1, 2) * 50;
 
         const rooms_list = ["Kitchen", "Upstairs Bath", "Downstairs Bath", "Laundry Room", "Dining Room", "Living Room", "Eric's Office", "Catie's Office", "Theatre Room", "Rory's Room", "Olive's Room", "Primary Bedroom", "Playroom", "General"];
 
@@ -121,17 +120,17 @@
             const [guildData, setGuildData] = useState({
                 familyXP: 0, familyGold: 0,
                 members: [
-                    { id: 'Eric', name: 'Eric', class: 'Architect', gp: 0 },
-                    { id: 'Catie', name: 'Catie', class: 'Alchemist', gp: 0 },
-                    { id: 'Rory', name: 'Rory', class: 'Squire', gp: 0 },
-                    { id: 'Olive', name: 'Olive', class: 'Scout', gp: 0 }
+                    { id: 'Eric', name: 'Eric', class: 'Architect', gp: 0, xp: 0 },
+                    { id: 'Catie', name: 'Catie', class: 'Alchemist', gp: 0, xp: 0 },
+                    { id: 'Rory', name: 'Rory', class: 'Squire', gp: 0, xp: 0 },
+                    { id: 'Olive', name: 'Olive', class: 'Scout', gp: 0, xp: 0 }
                 ],
                 quests: [], reminders: [], claimedBonuses: { rooms: [], sanctuary: false },
                 rewards: { Family: [], Eric: [], Catie: [], Rory: [], Olive: [] },
                 menu: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => ({ day: d, meal: 'TBD' }))
             });
 
-            const [newQuest, setNewQuest] = useState({ title: '', type: 'daily', assignedTo: 'Family', targetValue: 10, unit: 'pts' });
+            const [newQuest, setNewQuest] = useState({ title: '', type: 'daily', assignedTo: 'Family', targetValue: 1, unit: 'task' });
             const [newCleaning, setNewCleaning] = useState({ title: '', room: 'Kitchen', type: 'daily' });
             const [newReward, setNewReward] = useState({ label: '', rarity: 'Common', owner: 'Family' });
             const [newBounty, setNewBounty] = useState("");
@@ -173,16 +172,28 @@
                 if (!q || q.status === 'completed') return;
                 const newQuests = guildData.quests.map(x => x.id === id ? { ...x, status: 'completed' } : x);
                 
-                const update = { quests: newQuests, familyXP: Number(guildData.familyXP || 0) + (q.xp || 20) };
-                if (q.assignedTo === 'Family') update.familyGold = Number(guildData.familyGold || 0) + (q.reward || 10);
-                else update.members = guildData.members.map(m => m.id === q.assignedTo ? { ...m, gp: Number(m.gp || 0) + (q.reward || 10) } : m);
+                const xpAward = Number(q.xp || 0);
+                const gpAward = Number(q.reward || 0);
+
+                const update = { quests: newQuests };
+
+                if (q.assignedTo === 'Family') {
+                    update.familyGold = Number(guildData.familyGold || 0) + gpAward;
+                    update.familyXP = Number(guildData.familyXP || 0) + xpAward;
+                } else {
+                    update.members = guildData.members.map(m => 
+                        m.id === q.assignedTo 
+                        ? { ...m, gp: Number(m.gp || 0) + gpAward, xp: Number(m.xp || 0) + xpAward } 
+                        : m
+                    );
+                }
                 sync(update);
             };
 
-            const updateEpic = (id, amt) => {
+            const updateQuestProgress = (id, amt) => {
                 const newQuests = guildData.quests.map(x => {
                     if (x.id === id) {
-                        const val = Math.min(Number(x.currentValue || 0) + amt, Number(x.targetValue || 10));
+                        const val = Math.max(0, Math.min((Number(x.currentValue || 0) + amt), Number(x.targetValue || 1)));
                         return { ...x, currentValue: val };
                     }
                     return x;
@@ -251,8 +262,16 @@
                                 <div>
                                     <h1 className="rpg-title text-2xl md:text-3xl font-bold flex items-center gap-4 text-white"><Icon name="Crown" size={32} /> Brown Family Guild Hall</h1>
                                     <div className="flex items-center gap-3 mt-2">
-                                        <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Level {Math.floor(Number(guildData.familyXP || 0)/1000)}</span>
-                                        <div className="w-48 skyrim-progress-bg"><div className="skyrim-progress-fill" style={{ width: `${(Number(guildData.familyXP || 0) % 1000) / 10}%` }}></div></div>
+                                        <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Guild Level {getLevel(guildData.familyXP)}</span>
+                                        <div className="w-48 skyrim-progress-bg">
+                                            {(() => {
+                                                const lvl = getLevel(guildData.familyXP);
+                                                const currentLvlXP = getXPForLevel(lvl);
+                                                const nextLvlXP = getXPForLevel(lvl + 1);
+                                                const progress = ((guildData.familyXP - currentLvlXP) / (nextLvlXP - currentLvlXP)) * 100;
+                                                return <div className="skyrim-progress-fill" style={{ width: `${progress}%` }}></div>;
+                                            })()}
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-4">
@@ -270,12 +289,31 @@
                                 <button onClick={() => setActiveFilter('All')} className={`char-card p-4 min-w-[80px] flex flex-col items-center justify-center ${activeFilter === 'All' ? 'active' : ''}`}>
                                     <Icon name="LayoutGrid" size={24} className="mb-1 text-zinc-400" /><span className="text-[10px] uppercase font-bold tracking-widest">General</span>
                                 </button>
-                                {(guildData.members || []).map(m => (
-                                    <button key={m.id} onClick={() => setActiveFilter(m.id)} className={`char-card flex-1 min-w-[140px] p-4 text-left ${activeFilter === m.id ? 'active' : ''}`}>
-                                        <div className="flex items-center gap-3 mb-2"><Avatar id={m.id} /><div><span className="text-xs font-bold text-white block uppercase">{String(m.name)}</span><span className="text-[9px] text-zinc-500 uppercase">{String(m.class || 'Member')}</span></div></div>
-                                        <div className="text-amber-500 font-bold text-sm">{String(m.gp || 0)} GP</div>
-                                    </button>
-                                ))}
+                                {(guildData.members || []).map(m => {
+                                    const lvl = getLevel(m.xp);
+                                    const currentLvlXP = getXPForLevel(lvl);
+                                    const nextLvlXP = getXPForLevel(lvl + 1);
+                                    const progress = ((m.xp - currentLvlXP) / (nextLvlXP - currentLvlXP)) * 100;
+                                    
+                                    return (
+                                        <button key={m.id} onClick={() => setActiveFilter(m.id)} className={`char-card flex-1 min-w-[140px] p-4 text-left ${activeFilter === m.id ? 'active' : ''}`}>
+                                            <div className="flex items-center gap-3 mb-2">
+                                                <Avatar id={m.id} />
+                                                <div className="overflow-hidden">
+                                                    <span className="text-xs font-bold text-white block uppercase truncate">{String(m.name)}</span>
+                                                    <div className="flex items-center gap-1">
+                                                        <span className="text-[8px] uppercase font-bold text-amber-500">Lvl {lvl}</span>
+                                                        <div className="flex-1 skyrim-progress-bg h-[1px] w-12"><div className="bg-amber-500 h-full" style={{ width: `${progress}%` }}></div></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="flex justify-between items-center">
+                                                <div className="text-amber-500 font-bold text-[10px]">{String(m.gp || 0)} GP</div>
+                                                <div className="text-zinc-600 text-[8px] uppercase font-bold">{String(m.class || 'Member')}</div>
+                                            </div>
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </header>
 
@@ -286,19 +324,22 @@
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 border border-amber-900/30 p-6 bg-black/40 animate-in fade-in slide-in-from-top-2">
                                         <div className="space-y-3">
                                             <h2 className="text-[10px] uppercase font-bold text-blue-400 tracking-widest">Mission Summoner</h2>
-                                            <input className="w-full p-2 text-[10px]" placeholder="Mission name..." value={newQuest.title} onChange={e => setNewQuest({...newQuest, title: e.target.value})} />
+                                            <input className="w-full p-2 text-[10px]" placeholder="Name..." value={newQuest.title} onChange={e => setNewQuest({...newQuest, title: e.target.value})} />
                                             <select className="w-full p-2 text-[10px]" value={newQuest.assignedTo} onChange={e => setNewQuest({...newQuest, assignedTo: e.target.value})}>
                                                 <option value="Family">Guild Wide</option>{guildData.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                                             </select>
                                             <select className="w-full p-2 text-[10px]" value={newQuest.type} onChange={e => setNewQuest({...newQuest, type: e.target.value})}>
                                                 <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="campaign">Campaign</option>
                                             </select>
-                                            {newQuest.type === 'campaign' && <div className="flex gap-1 animate-in slide-in-from-left-1"><input className="w-1/2 p-2 text-[10px]" type="number" placeholder="Target" onChange={e => setNewQuest({...newQuest, targetValue: Number(e.target.value)})} /><input className="w-1/2 p-2 text-[10px]" placeholder="Unit" onChange={e => setNewQuest({...newQuest, unit: e.target.value})} /></div>}
+                                            <div className="flex gap-1">
+                                                <input className="w-1/2 p-2 text-[10px]" type="number" placeholder="Goal" onChange={e => setNewQuest({...newQuest, targetValue: Number(e.target.value)})} />
+                                                <input className="w-1/2 p-2 text-[10px]" placeholder="Unit" onChange={e => setNewQuest({...newQuest, unit: e.target.value})} />
+                                            </div>
                                             <button onClick={() => {
-                                                const rewardsMap = { daily: {gp: 10, xp: 20}, weekly: {gp: 60, xp: 120}, monthly: {gp: 250, xp: 500}, campaign: {gp: 1000, xp: 2000} };
-                                                const r = rewardsMap[newQuest.type] || rewardsMap.daily;
-                                                sync({ quests: [...guildData.quests, {...newQuest, id: Date.now(), status: 'active', currentValue: 0, reward: r.gp, xp: r.xp, category: 'Personal'}]});
-                                                setNewQuest({ title: '', type: 'daily', assignedTo: 'Family', targetValue: 10, unit: 'pts' });
+                                                const r = MISSION_REWARDS[newQuest.type];
+                                                const x = XP_REWARDS[newQuest.type];
+                                                sync({ quests: [...guildData.quests, {...newQuest, id: Date.now(), status: 'active', currentValue: 0, reward: r, xp: x, category: 'Personal'}]});
+                                                setNewQuest({ title: '', type: 'daily', assignedTo: 'Family', targetValue: 1, unit: 'task' });
                                             }} className="w-full py-2 bg-zinc-800 text-[9px] font-bold uppercase hover:bg-zinc-700">Add Mission</button>
                                         </div>
                                         <div className="space-y-3">
@@ -313,7 +354,7 @@
                                             <button onClick={() => {
                                                 const rewardsMap = { daily: { gp: 5, xp: 10 }, weekly: { gp: 30, xp: 60 }, monthly: { gp: 125, xp: 250 } };
                                                 const tier = rewardsMap[newCleaning.type] || rewardsMap.daily;
-                                                sync({ quests: [...guildData.quests, {...newCleaning, id: Date.now(), assignedTo: 'Family', category: 'Cleaning', status: 'active', reward: tier.gp, xp: tier.xp}]});
+                                                sync({ quests: [...guildData.quests, {...newCleaning, id: Date.now(), assignedTo: 'Family', category: 'Cleaning', status: 'active', reward: tier.gp, xp: tier.xp, type: newCleaning.type}]});
                                             }} className="w-full py-2 bg-zinc-800 text-[9px] font-bold uppercase hover:bg-zinc-700">Add Task</button>
                                             <button onClick={monthlyReset} className="w-full py-1 text-[8px] uppercase border border-red-900 text-red-900">Reset Cleanup</button>
                                         </div>
@@ -333,7 +374,7 @@
                                             <h2 className="text-[10px] uppercase font-bold text-purple-400 tracking-widest">Bounties & Data</h2>
                                             <input className="w-full p-2 text-[10px]" placeholder="Quick Bounty..." value={newBounty} onChange={e => setNewBounty(e.target.value)} />
                                             <button onClick={() => { if (!newBounty) return; sync({ reminders: [...(guildData.reminders || []), {id: Date.now(), text: newBounty, status: 'active'}] }); setNewBounty(""); }} className="w-full py-2 bg-zinc-800 text-[9px] font-bold uppercase">Post Bounty (+10G)</button>
-                                            <button onClick={exportLedger} className="w-full py-1 border border-zinc-700 text-[8px] uppercase">{archiveStatus || 'Export Ledger'}</button>
+                                            <button onClick={exportLedger} className="w-full py-1 border border-zinc-700 text-[8px] uppercase">{archiveStatus || 'Export Scroll'}</button>
                                             <textarea className="w-full h-8 text-[7px] p-1" placeholder="Paste data..." onChange={e => setImportText(e.target.value)} />
                                             <button onClick={restoreLedger} className="w-full py-1 text-[8px] bg-zinc-900 border border-zinc-700 uppercase">Restore</button>
                                         </div>
@@ -343,19 +384,28 @@
                                 <section className="space-y-6">
                                     <h2 className="rpg-title text-xl font-bold text-white uppercase tracking-widest">Legendary Campaigns</h2>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        {filteredEpics.map(q => (
-                                            <div key={q.id} className="p-6 border border-zinc-800 bg-black/40">
-                                                <div className="flex justify-between items-start mb-4">
-                                                    <div><h3 className="text-sm font-bold text-white uppercase tracking-wider">{String(q.title)}</h3><span className="text-[9px] text-zinc-500 uppercase tracking-tighter">{String(q.assignedTo)}</span></div>
-                                                    <span className="text-xs font-bold text-zinc-400">{String(q.currentValue || 0)}/{String(q.targetValue || 10)} {String(q.unit || '')}</span>
+                                        {filteredEpics.map(q => {
+                                            const progress = (Number(q.currentValue || 0) / Number(q.targetValue || 1)) * 100;
+                                            const isDone = progress >= 100;
+                                            return (
+                                                <div key={q.id} className="p-6 border border-zinc-800 bg-black/40">
+                                                    <div className="flex justify-between items-start mb-4">
+                                                        <div><h3 className="text-sm font-bold text-white uppercase tracking-wider">{String(q.title)}</h3><span className="text-[9px] text-zinc-500 uppercase tracking-tighter">{String(q.assignedTo)}</span></div>
+                                                        <span className="text-xs font-bold text-zinc-400">{String(q.currentValue || 0)}/{String(q.targetValue || 10)} {String(q.unit || '')}</span>
+                                                    </div>
+                                                    <div className="skyrim-progress-bg mb-6"><div className="skyrim-progress-fill amber" style={{ width: `${progress}%` }}></div></div>
+                                                    <div className="flex gap-2">
+                                                        {q.status !== 'completed' ? (
+                                                            <>
+                                                                <button onClick={() => updateQuestProgress(q.id, 1)} className="flex-1 py-1 border border-zinc-800 text-[9px] uppercase font-bold hover:border-zinc-500 transition-all">+1 Progress</button>
+                                                                {isDone && <button onClick={() => completeQuest(q.id)} className="px-4 py-1 bg-amber-600 text-black text-[9px] uppercase font-bold animate-pulse">Claim {String(q.reward || 1000)}G</button>}
+                                                            </>
+                                                        ) : <div className="text-[9px] uppercase font-bold text-zinc-600 italic">Campaign Complete</div>}
+                                                        {isMeetingMode && <button onClick={() => deleteQuest(q.id)} className="p-2 text-red-900 hover:text-red-500 transition-colors"><Icon name="Trash2" size={14} /></button>}
+                                                    </div>
                                                 </div>
-                                                <div className="skyrim-progress-bg mb-6"><div className="skyrim-progress-fill amber" style={{ width: `${((Number(q.currentValue || 0)) / (Number(q.targetValue || 1))) * 100}%` }}></div></div>
-                                                <div className="flex gap-2">
-                                                    <button onClick={() => updateEpic(q.id, 1)} className="flex-1 py-1 border border-zinc-800 text-[9px] uppercase font-bold hover:border-zinc-500 transition-all">+1 Progress</button>
-                                                    {isMeetingMode && <button onClick={() => deleteQuest(q.id)} className="p-2 text-red-900 hover:text-red-500 transition-colors"><Icon name="Trash2" size={14} /></button>}
-                                                </div>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 </section>
 
@@ -392,24 +442,44 @@
                                 <section className="space-y-6">
                                     <h2 className="rpg-title text-xl font-bold text-white uppercase tracking-widest">Active Missions</h2>
                                     <div className="max-h-[300px] overflow-y-auto pr-4 custom-scrollbar space-y-2">
-                                        {filteredQuests.map(q => (
-                                            <div key={q.id} className={`flex items-center justify-between p-4 border transition-all ${q.status === 'completed' ? 'border-zinc-900 opacity-50 shadow-none' : 'border-zinc-800 bg-black/40 shadow-lg shadow-black/50'}`}>
-                                                <div className="flex items-center gap-4 overflow-hidden">
-                                                    <Icon name={q.status === 'completed' ? 'CheckCircle' : 'Zap'} size={18} className={q.status === 'completed' ? 'text-zinc-700' : 'text-zinc-400'} />
-                                                    <div className="overflow-hidden">
-                                                        <div className="flex items-center gap-2">
-                                                            <h3 className="text-xs font-bold uppercase text-white tracking-wider truncate">{String(q.title)}</h3>
-                                                            <span className={`text-[7px] px-1 font-bold uppercase border ${q.type === 'monthly' ? 'text-purple-400 border-purple-900' : q.type === 'weekly' ? 'text-blue-400 border-blue-900' : 'text-zinc-500 border-zinc-800'}`}>{String(q.type)}</span>
+                                        {filteredQuests.map(q => {
+                                            const progress = (Number(q.currentValue || 0) / Number(q.targetValue || 1)) * 100;
+                                            const isScalable = Number(q.targetValue) > 1;
+                                            return (
+                                                <div key={q.id} className={`flex flex-col p-4 border transition-all ${q.status === 'completed' ? 'border-zinc-900 opacity-50 shadow-none' : 'border-zinc-800 bg-black/40 shadow-lg shadow-black/50'}`}>
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-4 overflow-hidden">
+                                                            <Icon name={q.status === 'completed' ? 'CheckCircle' : 'Zap'} size={18} className={q.status === 'completed' ? 'text-zinc-700' : 'text-zinc-400'} />
+                                                            <div className="overflow-hidden">
+                                                                <div className="flex items-center gap-2">
+                                                                    <h3 className="text-xs font-bold uppercase text-white tracking-wider truncate">{String(q.title)}</h3>
+                                                                    <span className={`text-[7px] px-1 font-bold uppercase border ${q.type === 'monthly' ? 'text-purple-400 border-purple-900' : q.type === 'weekly' ? 'text-blue-400 border-blue-900' : 'text-zinc-500 border-zinc-800'}`}>{String(q.type)}</span>
+                                                                </div>
+                                                                <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-tighter">{String(q.assignedTo)} • +{String(q.reward || 0)} GP</div>
+                                                            </div>
                                                         </div>
-                                                        <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-tighter">{String(q.assignedTo)} • +{String(q.reward || 0)} GP</div>
+                                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                                            {q.status === 'active' && (
+                                                                <>
+                                                                    {isScalable && <button onClick={() => updateQuestProgress(q.id, 1)} className="text-[9px] uppercase font-bold border border-zinc-800 px-3 py-1 hover:border-zinc-500 transition-all">+1 {q.unit}</button>}
+                                                                    {(progress >= 100 || !isScalable) && <button onClick={() => completeQuest(q.id)} className="text-[9px] uppercase font-bold border border-zinc-700 px-4 py-1 hover:border-white transition-all active:scale-95 bg-zinc-900">Claim</button>}
+                                                                </>
+                                                            )}
+                                                            {isMeetingMode && <button onClick={() => deleteQuest(q.id)} className="text-red-900 p-2 hover:text-red-500 transition-colors"><Icon name="Trash2" size={14} /></button>}
+                                                        </div>
                                                     </div>
+                                                    {isScalable && q.status === 'active' && (
+                                                        <div className="mt-3">
+                                                            <div className="flex justify-between text-[8px] uppercase font-bold text-zinc-500 mb-1">
+                                                                <span>Progress</span>
+                                                                <span>{q.currentValue}/{q.targetValue} {q.unit}</span>
+                                                            </div>
+                                                            <div className="skyrim-progress-bg"><div className="skyrim-progress-fill" style={{ width: `${progress}%` }}></div></div>
+                                                        </div>
+                                                    )}
                                                 </div>
-                                                <div className="flex items-center gap-2 flex-shrink-0">
-                                                    {q.status === 'active' && <button onClick={() => completeQuest(q.id)} className="text-[9px] uppercase font-bold border border-zinc-700 px-4 py-1 hover:border-white transition-all active:scale-95">Claim</button>}
-                                                    {isMeetingMode && <button onClick={() => deleteQuest(q.id)} className="text-red-900 p-2 hover:text-red-500 transition-colors"><Icon name="Trash2" size={14} /></button>}
-                                                </div>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 </section>
 
